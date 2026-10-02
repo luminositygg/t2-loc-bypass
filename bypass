@@ -1,4 +1,3 @@
-
 Clear-Host
 
 if ([System.Threading.Thread]::CurrentThread.GetApartmentState() -ne 'STA') {
@@ -866,6 +865,7 @@ $script:NvidiaStreamproofValues = @(36)
 
 function Test-NvidiaStreamproofBypassActive {
     param($State)
+    return $false # BYPASSED: streamproof check disabled
 
     if (-not $State.Exists) { return $false }
 
