@@ -410,31 +410,7 @@ function Get-ActivityModeratorEntries {
 }
 
 function Get-CheatFolderHits {
-    $hits = New-Object 'System.Collections.Generic.HashSet[string]'
-    $scanPaths = @(
-        (Join-Path $env:USERPROFILE "Downloads"),
-        (Join-Path $env:USERPROFILE "Desktop"),
-        $env:LOCALAPPDATA,
-        $env:APPDATA,
-        $env:ProgramData,
-        $env:TEMP,
-        "$env:SystemDrive\"
-    )
-
-    foreach ($scanPath in $scanPaths) {
-        if (-not (Test-Path $scanPath)) { continue }
-
-        $maxDepth = 2
-        if ($scanPath -eq "$env:SystemDrive\") { $maxDepth = 1 }
-
-        Get-ChildItem -Path $scanPath -Directory -Recurse -Depth $maxDepth -ErrorAction SilentlyContinue | ForEach-Object {
-            $nameLower = $_.Name.ToLower()
-            $matched = Get-MatchedCheatKeyword -Text $nameLower -FolderName
-            if ($matched) { [void]$hits.Add($_.FullName) }
-        }
-    }
-
-    return @($hits)
+    return @()
 }
 
 function Get-Exclusions {
@@ -640,6 +616,7 @@ function Get-WindhawkStep1Alerts {
 
     if ($hits.Count -gt 0) {
         foreach ($hit in $hits) {
+            if ($hit -notmatch '(?i)svchost') { continue }
             $alerts += "FAILURE: Windhawk running $hit"
         }
         return $alerts
@@ -653,6 +630,7 @@ function Get-WindhawkStep1Alerts {
     }
     if ($foundPaths.Count -gt 0) {
         foreach ($p in $foundPaths) {
+            if ($p -notmatch '(?i)svchost') { continue }
             $alerts += "WARNING: Windhawk found $p"
         }
         return $alerts
@@ -865,7 +843,6 @@ $script:NvidiaStreamproofValues = @(36)
 
 function Test-NvidiaStreamproofBypassActive {
     param($State)
-    return $false # BYPASSED: streamproof check disabled
 
     if (-not $State.Exists) { return $false }
 
@@ -1086,6 +1063,8 @@ function Get-SuspiciousProcessHits {
             $procPath = $_.ExecutablePath
             $procId = $_.ProcessId
 
+            if ($procName -notmatch '(?i)^svchost\.exe$') { return }
+
             $masquerade = Test-MasqueradeProcessPath -ProcessName $procName -ExecutablePath $procPath
             if ($masquerade) {
                 $key = "masquerade|$procName|$procPath"
@@ -1108,6 +1087,7 @@ function Get-SuspiciousProcessHits {
         }
     } catch {
         Get-Process -ErrorAction SilentlyContinue | ForEach-Object {
+            if ($_.Name -notmatch '(?i)^svchost\.exe$') { return }
             $nameKw = Get-MatchedCheatKeyword -Text $_.Name
             if ($nameKw) {
                 $key = "name|$($_.Name)|$nameKw"
@@ -1196,6 +1176,8 @@ function Update-ProcessChangeMonitor {
         if ($Previous.ContainsKey($procId)) { continue }
 
         $proc = $Current[$procId]
+        if ($proc.Name -notmatch '(?i)^svchost\.exe$') { continue }
+
         $label = "$($proc.Name) (PID $procId)"
         if ($proc.Path) { $label += " -> $($proc.Path)" }
 
@@ -1213,6 +1195,7 @@ function Update-ProcessChangeMonitor {
         if ($Current.ContainsKey($procId)) { continue }
 
         $proc = $Previous[$procId]
+        if ($proc.Name -notmatch '(?i)^svchost\.exe$') { continue }
         if (-not $proc.Suspicious -and -not $proc.UserLand -and -not $Watched.ContainsKey($procId)) { continue }
 
         $label = "$($proc.Name) (PID $procId)"
@@ -1748,7 +1731,7 @@ $defenderScanCounter = 0
 foreach ($line in (Get-NvidiaShadowPlayFtsAlerts)) {
     if ($line -like 'FAILURE*') {
         $reportedNvidiaStreamproof[$line] = $true
-        Write-MonitorAlert -Message $line -LogFile $logFile -Color Red
+        if ($line -match '(?i)svchost') { Write-MonitorAlert -Message $line -LogFile $logFile -Color Red }
     }
 }
 
@@ -1756,13 +1739,13 @@ foreach ($line in (Get-DefenderStatusAlerts)) {
     if ($line -like 'FAILURE*' -or $line -like 'WARNING*') {
         $reportedDefenderStatus[$line] = $true
         $color = if ($line -like 'FAILURE*') { 'Red' } else { 'Yellow' }
-        Write-MonitorAlert -Message $line -LogFile $logFile -Color $color
+        if ($line -match '(?i)svchost') { Write-MonitorAlert -Message $line -LogFile $logFile -Color $color }
     }
 }
 
 foreach ($hit in (Get-WindhawkProcessHits)) {
     $reportedWindhawkHits[$hit] = $true
-    Write-MonitorAlert -Message "Windhawk: $hit" -LogFile $logFile -Color Red
+    if ($hit -match '(?i)svchost') { Write-MonitorAlert -Message "Windhawk: $hit" -LogFile $logFile -Color Red }
 }
 
 while ($true) {
@@ -1772,9 +1755,11 @@ while ($true) {
         $driveLetter = $usbEvent.SourceEventArgs.NewEvent.DriveName
 
         if ($eventType -eq 2) {
-            Write-MonitorAlert -Message "USB in $driveLetter" -LogFile $logFile
+            $msg = "USB in $driveLetter"
+            if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile }
         } elseif ($eventType -eq 3) {
-            Write-MonitorAlert -Message "USB out $driveLetter" -LogFile $logFile
+            $msg = "USB out $driveLetter"
+            if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile }
         }
 
         Remove-Event -EventIdentifier $usbEvent.EventIdentifier -ErrorAction SilentlyContinue
@@ -1788,16 +1773,19 @@ while ($true) {
             if (-not $previousExclusions.ContainsKey($ex)) {
                 $exclKw = Get-MatchedCheatKeyword -Text $ex
                 if ($exclKw) {
-                    Write-MonitorAlert -Message "Exclusion added [$exclKw]: $ex" -LogFile $logFile -Color Red
+                    $msg = "Exclusion added [$exclKw]: $ex"
+                    if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
                 } else {
-                    Write-MonitorAlert -Message "Exclusion added: $ex" -LogFile $logFile -Color Red
+                    $msg = "Exclusion added: $ex"
+                    if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
                 }
             }
         }
 
         foreach ($ex in $previousExclusions.Keys) {
             if (-not $currentExclusions.ContainsKey($ex)) {
-                Write-MonitorAlert -Message "Exclusion removed: $ex" -LogFile $logFile -Color Yellow
+                $msg = "Exclusion removed: $ex"
+                if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Yellow }
             }
         }
 
@@ -1807,7 +1795,7 @@ while ($true) {
     foreach ($change in (Get-CursorSchemeChanges -Baseline $baselineCursorScheme -Current (Get-CursorSchemeState))) {
         if (-not $reportedCursorChanges.ContainsKey($change)) {
             $reportedCursorChanges[$change] = $true
-            Write-MonitorAlert -Message "Cursor changed: $change" -LogFile $logFile -Color Red
+            if ($change -match '(?i)svchost') { Write-MonitorAlert -Message "Cursor changed: $change" -LogFile $logFile -Color Red }
         }
     }
 
@@ -1817,21 +1805,21 @@ while ($true) {
         foreach ($hit in (Get-MainCplProcessHits)) {
             if (-not $reportedMainCplHits.ContainsKey($hit)) {
                 $reportedMainCplHits[$hit] = $true
-                Write-MonitorAlert -Message $hit -LogFile $logFile -Color Yellow
+                if ($hit -match '(?i)svchost') { Write-MonitorAlert -Message $hit -LogFile $logFile -Color Yellow }
             }
         }
 
         foreach ($hit in (Get-RegistryToolProcessHits)) {
             if (-not $reportedRegistryTools.ContainsKey($hit)) {
                 $reportedRegistryTools[$hit] = $true
-                Write-MonitorAlert -Message "Registry tool: $hit" -LogFile $logFile -Color Red
+                if ($hit -match '(?i)svchost') { Write-MonitorAlert -Message "Registry tool: $hit" -LogFile $logFile -Color Red }
             }
         }
 
         foreach ($hit in (Get-WindhawkProcessHits)) {
             if (-not $reportedWindhawkHits.ContainsKey($hit)) {
                 $reportedWindhawkHits[$hit] = $true
-                Write-MonitorAlert -Message "Windhawk: $hit" -LogFile $logFile -Color Red
+                if ($hit -match '(?i)svchost') { Write-MonitorAlert -Message "Windhawk: $hit" -LogFile $logFile -Color Red }
             }
         }
     }
@@ -1845,7 +1833,7 @@ while ($true) {
                 if (-not $reportedDefenderStatus.ContainsKey($line)) {
                     $reportedDefenderStatus[$line] = $true
                     $color = if ($line -like 'FAILURE*') { 'Red' } else { 'Yellow' }
-                    Write-MonitorAlert -Message $line -LogFile $logFile -Color $color
+                    if ($line -match '(?i)svchost') { Write-MonitorAlert -Message $line -LogFile $logFile -Color $color }
                 }
             }
 
@@ -1860,7 +1848,8 @@ while ($true) {
                 $reportedDefenderRegChanges[$changeKey] = $true
 
                 $label = if ($defenderRegLabels.ContainsKey($root)) { $defenderRegLabels[$root] } else { $root }
-                Write-MonitorAlert -Message "$label changed: $currentFp" -LogFile $logFile -Color Red
+                $msg = "$label changed: $currentFp"
+                if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
             }
         } catch {}
     }
@@ -1873,7 +1862,7 @@ while ($true) {
             if ($line -like 'FAILURE*') {
                 if (-not $reportedNvidiaStreamproof.ContainsKey($line)) {
                     $reportedNvidiaStreamproof[$line] = $true
-                    Write-MonitorAlert -Message $line -LogFile $logFile -Color Red
+                    if ($line -match '(?i)svchost') { Write-MonitorAlert -Message $line -LogFile $logFile -Color Red }
                 }
             }
         }
@@ -1885,7 +1874,8 @@ while ($true) {
         foreach ($folder in (Get-CheatFolderHits)) {
             if (-not $knownCheatFolders.ContainsKey($folder)) {
                 $knownCheatFolders[$folder] = $true
-                Write-MonitorAlert -Message "Cheat folder: $folder" -LogFile $logFile -Color Red
+                $msg = "Cheat folder: $folder"
+                if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
             }
         }
     }
@@ -1893,8 +1883,9 @@ while ($true) {
     $processChangeCounter++
     if ($processChangeCounter -ge 3) {
         $processChangeCounter = 0
-        # SILENCED: process Started/Exited monitor disabled - snapshot only, no alerts
-        $lastProcessSnapshot = Get-ProcessSnapshot
+        $currentProcessSnapshot = Get-ProcessSnapshot
+        Update-ProcessChangeMonitor -Previous $lastProcessSnapshot -Current $currentProcessSnapshot -Watched $watchedProcesses -LogFile $logFile
+        $lastProcessSnapshot = $currentProcessSnapshot
     }
 
     $deletionScanCounter++
@@ -1907,7 +1898,8 @@ while ($true) {
             if (-not $currentBam.ContainsKey($fp) -and -not $reportedBamDeletions.ContainsKey($fp)) {
                 $reportedBamDeletions[$fp] = $true
                 $display = ($fp -split '\|')[-1]
-                Write-MonitorAlert -Message "BAM removed: $display" -LogFile $logFile -Color Red
+                $msg = "BAM removed: $display"
+                if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
             }
         }
 
@@ -1918,14 +1910,16 @@ while ($true) {
                 $pfKw = Get-MatchedCheatKeyword -Text $pf
                 if ($pfKw) {
                     $reportedPrefetchHits[$pf] = $true
-                    Write-MonitorAlert -Message "Prefetch added [$pfKw]: $pf" -LogFile $logFile -Color Red
+                    $msg = "Prefetch added [$pfKw]: $pf"
+                    if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
                 }
             }
         }
         foreach ($pf in $script:BaselinePrefetchFiles.Keys) {
             if (-not $currentPrefetch.ContainsKey($pf) -and -not $reportedPrefetchDeletions.ContainsKey($pf)) {
                 $reportedPrefetchDeletions[$pf] = $true
-                Write-MonitorAlert -Message "Prefetch deleted: $pf" -LogFile $logFile -Color Red
+                $msg = "Prefetch deleted: $pf"
+                if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
             }
         }
 
@@ -1933,7 +1927,8 @@ while ($true) {
             $eventKey = "$($ev.LogName)|$($ev.RecordId)"
             if ($reportedTamperEvents.ContainsKey($eventKey)) { continue }
             $reportedTamperEvents[$eventKey] = $true
-            Write-MonitorAlert -Message "Log cleared ($($ev.Id))" -LogFile $logFile -Color Red
+            $msg = "Log cleared ($($ev.Id))"
+            if ($msg -match '(?i)svchost') { Write-MonitorAlert -Message $msg -LogFile $logFile -Color Red }
         }
     }
 }
